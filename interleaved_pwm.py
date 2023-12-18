@@ -3,7 +3,13 @@ from machine import Pin, mem32, Timer
 from utime import sleep_us
 import time
 
-machine.freq(160_000_000)
+machine.freq(200_000_000)
+
+#TODO:
+# - implement defined start of sm
+# - implement defined turn off of sm
+# - alloff sm does not work properly. first instructions could not be seen.
+# - before calling alloff set the PC to the beginning before the wrap_target()
 
 # INSTRUCTIONS
 #    ______________________
@@ -28,44 +34,47 @@ machine.freq(160_000_000)
 # Set-up the state machine with four output pins all initially low
 @asm_pio(set_init = (PIO.OUT_LOW,PIO.OUT_LOW,PIO.OUT_LOW,PIO.OUT_LOW))
 def clockw():
+    ON = 19
+    OFF = 19
+    DEAD = 0
     # all pins off
-    set(pins, 0b00000)
+    #set(pins, 0b00000)            # this line will only be executed once. The program counter can not be reset to this position.
     wrap_target()
     # on time
-    set(pins, 0b00101) [18]
-    set(pins, 0b00101) [10]		# doubled for doubled SM frequency
+    set(pins, 0b00101) [ON]
+    set(pins, 0b00101) [ON - 1]		# doubled for doubled SM frequency
     # dead time
-    set(pins, 0b00100)			# only one cycle
+    set(pins, 0b00100) [DEAD]		# only one cycle
     # off time
-    set(pins, 0b00110) [20]
-    set(pins, 0b00110) [28]		# doubled for doubled SM frequency
+    set(pins, 0b00110) [OFF]
+    set(pins, 0b00110) [OFF - 1]	# doubled for doubled SM frequency
     # dead time
-    set(pins, 0b00100)			# only one cycle
+    set(pins, 0b00100) [DEAD]		# only one cycle
     wrap()
     
 @asm_pio(set_init = (PIO.OUT_LOW,PIO.OUT_LOW,PIO.OUT_LOW,PIO.OUT_LOW,))
 def cclockw():
-    set(pins, 0b00000)
+    ON = 19
+    OFF = 19
+    DEAD = 0
+    #set(pins, 0b00000)
     wrap_target()
     # on time
-    set(pins, 0b01010) [18]
-    set(pins, 0b01010) [18]
+    set(pins, 0b01010) [ON]
+    set(pins, 0b01010) [ON - 1]
     # dead time
-    set(pins, 0b00010)
+    set(pins, 0b00010) [DEAD]
     # off time
-    set(pins, 0b00110) [18]
-    set(pins, 0b00110) [18]
+    set(pins, 0b00110) [OFF]
+    set(pins, 0b00110) [OFF - 1]
     # dead time
-    set(pins, 0b00010)
+    set(pins, 0b00010) [DEAD]
     wrap()
 
 @asm_pio(set_init = (PIO.OUT_LOW,PIO.OUT_LOW,PIO.OUT_LOW,PIO.OUT_LOW))
 def alloff():
-    set(pins, 0b00000)
-    wrap_target()
-    set(pins, 0b00000)
-    nop()
-    wrap()
+    set(pins, 0b00000) # these lines are not executed... why? not properly restarted?
+
     
 # 1/800kHz=1,25µs (SM Clock)
 # 1/20kHz =50µs	  (PWM Clock)
@@ -75,34 +84,30 @@ cw = StateMachine(0, clockw,   freq = 1_600_000, set_base = Pin(19))
 ccw = StateMachine(1, cclockw, freq = 1_600_000, set_base = Pin(19))
 off = StateMachine(2, alloff,  freq = 1_600_000, set_base = Pin(19))
 
-cw.active(0)
-ccw.active(0)
-off.active(1)
+# enable SM2 [PIO0 Base addr. + CTRL reg]
+machine.mem32[0x50200000 + 0x000] =  0b000000000100
 
 actual_time = 0
 last_time = 0
 refresh_rate = 10
 hb_state = 0
 
+cw_only =  0b000000000001
+ccw_only = 0b000000000010
+off_only = 0b000000000100
+
 while (True):
-    #cw.active(1)
-    actual_time = time.ticks_ms()
     
-    # all <refresh_rate> milli seconds the state machine swaps
-    if actual_time - last_time > refresh_rate:
-        last_time = actual_time
-        if hb_state == 0:
-            # enable and restart cw turn off ccw
-            off.active(0)
-            cw.active(1)
-            hb_state = 1 # is cw on
-        else:
-            # enable and restart ccw and disable cw
-            cw.active(0)
-            off.active(1)
-
-            hb_state = 0
-            
-
-            
-
+    user_input = input("Enter the case number (1: CW, 2: CCW, or 3: Off): ")
+    
+    if user_input == '1':
+        machine.mem32[0x50200000 + 0x000] = cw_only # enable cw_only
+        print("Running CW")
+    elif user_input == '2':
+        machine.mem32[0x50200000 + 0x000] = ccw_only # enable ccw_only
+        print("Running CCW")
+    elif user_input == '3':
+        machine.mem32[0x50200000 + 0x000] = off_only # enable off_only
+        print("Turning OFF")
+    else:
+        print("Invalid Input")
