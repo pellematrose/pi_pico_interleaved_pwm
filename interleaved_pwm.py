@@ -1,3 +1,6 @@
+# created by pellematrose
+# 18.12.2023
+
 from rp2 import PIO, StateMachine, asm_pio
 from machine import Pin, mem32, Timer
 from utime import sleep_us
